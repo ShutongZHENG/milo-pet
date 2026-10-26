@@ -23,7 +23,7 @@ cargo build --release
 cargo run --release
 ```
 
-⚠️ **`assets/frames.bin` 不随仓库分发**（~36MB，被 `.gitignore` 忽略）。程序按相对路径加载它，必须从项目根运行。请用下方素材管线从你自己的绿幕视频生成，或手动放置兼容的帧包。
+仓库自带一份打包好的 `assets/frames.bin`（~36MB：230 帧 @ 24fps，源自 vidu 生成的约克夏绿幕动画）。程序按相对路径加载它，**必须从项目根运行**。想换成自己的宠物，用下方素材管线重新打包替换即可。
 
 ## 素材管线：绿幕 MP4 → frames.bin
 
