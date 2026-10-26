@@ -1,0 +1,20 @@
+[package]
+name = "milo-pet"
+version = "0.1.0"
+edition = "2021"
+description = "纯离线桌面宠物（Rust 重写版）：透明置顶窗口 + 帧序列动画 + 拖拽甩抛物理"
+
+[dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_System_SystemInformation",
+    "Win32_UI_HiDpi",
+    "Win32_UI_WindowsAndMessaging",
+] }
+zstd = "0.13"
+toml = "0.8"
+
+[profile.release]
+opt-level = 2

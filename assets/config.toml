@@ -1,0 +1,9 @@
+# Milo 桌宠配置（milo-pet Rust 版）
+# width：窗口宽度（逻辑像素，按系统 DPI 自动缩放；高度按素材 16:9 自动计算）
+# corner：初始位置角落 top-right / top-left / bottom-right / bottom-left
+# margin_x / margin_y：距工作区边缘的边距（逻辑像素）
+
+width = 350
+corner = "top-right"
+margin_x = 24
+margin_y = 100
