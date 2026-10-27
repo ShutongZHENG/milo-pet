@@ -6,21 +6,65 @@ use std::ptr;
 
 use windows::core::w;
 use windows::core::PCWSTR;
-use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM};
+use windows::Win32::Foundation::{BOOL, COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, GetStockObject, ReleaseDC,
-    SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BLENDFUNCTION, DIB_RGB_COLORS, HBRUSH,
-    HBITMAP, HDC, NULL_BRUSH, AC_SRC_ALPHA, AC_SRC_OVER,
+    CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, EnumDisplayMonitors, GetDC,
+    GetMonitorInfoW, GetStockObject, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
+    BLENDFUNCTION, DIB_RGB_COLORS, HBRUSH, HBITMAP, HDC, HMONITOR, MONITORINFOEXW, NULL_BRUSH,
+    AC_SRC_ALPHA, AC_SRC_OVER,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, LoadCursorW, PostQuitMessage, RegisterClassW, SetWindowPos,
-    UpdateLayeredWindow, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW, HWND_TOPMOST,
-    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, ULW_ALPHA, WNDCLASSW, WS_EX_LAYERED,
-    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, LoadCursorW, PostQuitMessage, RegisterClassW,
+    SetWindowPos, UpdateLayeredWindow, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW,
+    HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, ULW_ALPHA, WNDCLASSW,
+    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
 pub const CLASS_NAME: PCWSTR = w!("MiloPetWindow");
+
+/// 一块显示器：工作区（反弹与归属判定，任务栏挖掉的条带不在此列）+ 完整面板（含任务栏区）。
+pub struct Monitor {
+    pub work: RECT,
+    pub panel: RECT,
+}
+
+/// EnumDisplayMonitors 回调：收集 MONITORINFOEXW 的 rcWork / rcMonitor。
+unsafe extern "system" fn enum_mon_proc(
+    hmon: HMONITOR,
+    _hdc: HDC,
+    _lprc: *mut RECT,
+    lparam: LPARAM,
+) -> BOOL {
+    let out = &mut *(lparam.0 as *mut Vec<Monitor>);
+    let mut mi = MONITORINFOEXW::default();
+    mi.monitorInfo.cbSize = mem::size_of::<MONITORINFOEXW>() as u32;
+    if GetMonitorInfoW(hmon, &mut mi as *mut MONITORINFOEXW as *mut _).as_bool() {
+        out.push(Monitor { work: mi.monitorInfo.rcWork, panel: mi.monitorInfo.rcMonitor });
+    }
+    BOOL(1) // 继续枚举
+}
+
+/// 枚举全部显示器（工作区 + 面板）。失败或为空时退化为系统工作区单屏。
+pub fn monitors() -> Vec<Monitor> {
+    unsafe {
+        let mut out: Vec<Monitor> = Vec::new();
+        let ptr = &mut out as *mut Vec<Monitor>;
+        let _ = EnumDisplayMonitors(None, None, Some(enum_mon_proc), LPARAM(ptr as isize));
+        if out.is_empty() {
+            let mut rect = RECT::default();
+            windows::Win32::UI::WindowsAndMessaging::SystemParametersInfoW(
+                windows::Win32::UI::WindowsAndMessaging::SPI_GETWORKAREA,
+                0,
+                Some(&mut rect as *mut RECT as *mut c_void),
+                windows::Win32::UI::WindowsAndMessaging::SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+            )
+            .ok();
+            out.push(Monitor { work: rect, panel: rect });
+        }
+        out
+    }
+}
 
 pub struct PetWindow {
     pub hwnd: HWND,
@@ -214,8 +258,8 @@ impl PetWindow {
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
             )
             .ok();
-            // DIB 预留 Q 弹放大余量（sx 最大 1.15）
-            let blitter = Blitter::new(display_w * 6 / 5 + 8, display_h + 8, frame_w, frame_h)?;
+            // DIB 预留 Q 弹放大余量：scaleY 回弹段过冲最大 1.12（easeOutBack），宽高都要 6/5 余量
+            let blitter = Blitter::new(display_w * 6 / 5 + 8, display_h * 6 / 5 + 8, frame_w, frame_h)?;
             Ok(PetWindow { hwnd, blitter })
         }
     }
@@ -237,5 +281,87 @@ pub unsafe extern "system" fn wndproc(
             LRESULT(0)
         }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+    }
+}
+
+const POPUP_CLASS_NAME: PCWSTR = w!("MiloScorePopupWindow");
+
+/// 弹窗专用 wndproc：销毁只关自己，不 PostQuitMessage（区别于桌宠主窗口）。
+unsafe extern "system" fn popup_wndproc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    DefWindowProcW(hwnd, msg, wparam, lparam)
+}
+
+/// 一次性缓冲的分层窗口（得分弹窗等）：1:1 贴预乘 BGRA，无缩放。
+pub struct PopupWindow {
+    pub hwnd: HWND,
+    blitter: Blitter,
+    w: i32,
+    h: i32,
+}
+
+impl PopupWindow {
+    pub fn create(w: i32, h: i32) -> Result<Self, String> {
+        unsafe {
+            let instance = HINSTANCE(GetModuleHandleW(None).map_err(|e| format!("GetModuleHandleW: {e}"))?.0);
+            let wc = WNDCLASSW {
+                style: CS_HREDRAW | CS_VREDRAW,
+                lpfnWndProc: Some(popup_wndproc),
+                hInstance: instance,
+                hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
+                hbrBackground: HBRUSH(GetStockObject(NULL_BRUSH).0),
+                lpszClassName: POPUP_CLASS_NAME,
+                ..Default::default()
+            };
+            RegisterClassW(&wc); // 已注册时报错可忽略
+            let hwnd = CreateWindowExW(
+                WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                POPUP_CLASS_NAME,
+                w!(""),
+                WS_POPUP,
+                0,
+                0,
+                w,
+                h,
+                None,
+                None,
+                instance,
+                None,
+            )
+            .map_err(|e| format!("CreateWindowExW(popup) 失败: {e}"))?;
+            let _ = windows::Win32::UI::WindowsAndMessaging::ShowWindow(
+                hwnd,
+                windows::Win32::UI::WindowsAndMessaging::SW_SHOW,
+            );
+            SetWindowPos(
+                hwnd,
+                HWND_TOPMOST,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            )
+            .ok();
+            let blitter = Blitter::new(w, h, w, h)?;
+            Ok(PopupWindow { hwnd, blitter, w, h })
+        }
+    }
+
+    /// 1:1 贴整块预乘 BGRA（长度必须为 w*h*4）并更新到屏幕 (x, y)。
+    pub fn update(&self, bgra: &[u8], x: i32, y: i32) -> Result<(), String> {
+        self.blitter.blit(self.hwnd, bgra, x, y, self.w, self.h)
+    }
+}
+
+impl Drop for PopupWindow {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = DestroyWindow(self.hwnd);
+        }
     }
 }

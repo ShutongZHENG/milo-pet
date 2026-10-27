@@ -7,3 +7,14 @@ width = 350
 corner = "top-right"
 margin_x = 24
 margin_y = 100
+
+# 锁定当前屏幕：抛掷与活动只在所在屏内，不跨屏飞行
+confine_to_screen = false
+
+# 抛掷物理（对标 dsh-pet；缺省字段回落内置默认）
+[physics]
+gravity = 1400        # px/s²
+restitution = 0.78    # 碰边恢复系数
+ground_friction = 2.5 # 地面水平摩擦 /s
+ceiling_bounce = true # 顶部碰边反弹（false = 飞出顶屏靠重力落回）
+throw_power = 1.0     # 初速总力度缩放
