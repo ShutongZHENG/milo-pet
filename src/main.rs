@@ -6,6 +6,9 @@
 //! - 交互：左键按住拖拽、甩抛（重力/反弹/摩擦）、点击 Q 弹、右键菜单（回位/退出）
 //! - 配置：assets/config.toml
 
+// Windows GUI 应用：不显示控制台窗口
+#![windows_subsystem = "windows"]
+
 mod config;
 mod frames;
 mod physics;
