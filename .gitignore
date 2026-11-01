@@ -6,3 +6,5 @@
 frames/
 .venv/
 __pycache__/
+/release/
+FIX_CONSOLE_ISSUE.md
