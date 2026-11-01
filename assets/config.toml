@@ -2,7 +2,6 @@
 # width：窗口宽度（逻辑像素，按系统 DPI 自动缩放；高度按素材 16:9 自动计算）
 # corner：初始位置角落 top-right / top-left / bottom-right / bottom-left
 # margin_x / margin_y：距工作区边缘的边距（逻辑像素）
-
 width = 350
 corner = "top-right"
 margin_x = 24
@@ -10,6 +9,10 @@ margin_y = 100
 
 # 锁定当前屏幕：抛掷与活动只在所在屏内，不跨屏飞行
 confine_to_screen = false
+
+# 空闲入睡：安静超过该秒数自动播放睡觉动画（点击/拖拽唤醒）；0 = 关闭
+# 需 assets/sleep.bin 存在，缺失时自动关闭
+sleep_after = 30
 
 # 抛掷物理（对标 dsh-pet；缺省字段回落内置默认）
 [physics]

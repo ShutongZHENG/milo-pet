@@ -14,6 +14,8 @@ pub struct Config {
     pub physics: PhysicsParams,
     /// 锁定当前屏幕：抛掷只在所在屏内活动，不跨屏（根字段，不属 [physics]）
     pub confine_to_screen: bool,
+    /// 空闲入睡阈值（秒）：安静超过该时长自动切换睡觉动画；0 = 关闭睡眠
+    pub sleep_after: f64,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -37,6 +39,7 @@ impl Config {
             margin_y: 100.0,
             physics: PhysicsParams::default(),
             confine_to_screen: false,
+            sleep_after: 30.0,
         };
         let Ok(text) = fs::read_to_string(path) else {
             return cfg;
@@ -65,6 +68,11 @@ impl Config {
         }
         if let Some(c) = value.get("confine_to_screen").and_then(|v| v.as_bool()) {
             cfg.confine_to_screen = c;
+        }
+        if let Some(s) = num(value.get("sleep_after")) {
+            if s >= 0.0 {
+                cfg.sleep_after = s;
+            }
         }
         if let Some(p) = value.get("physics") {
             if let Some(g) = num(p.get("gravity")) {

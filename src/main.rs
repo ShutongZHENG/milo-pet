@@ -33,8 +33,26 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_RBUTTONUP, WM_QUIT,
 };
 
+/// 动画状态：待机循环 / 睡觉循环（sleep.bin，可选）
+#[derive(Clone, Copy, PartialEq)]
+enum Anim {
+    Idle,
+    Sleep,
+}
+
 struct App {
     pack: FramePack,
+    /// 睡觉帧包（assets/sleep.bin）；缺失或尺寸不一致时为 None（睡眠功能关闭）
+    sleep_pack: Option<FramePack>,
+    anim: Anim,
+    /// 当前动画循环内时间（秒）；切状态时清零
+    anim_t: f64,
+    /// 上次解码帧号；-1 = 需强制重解
+    last_frame: i64,
+    /// 上次与宠物互动的时刻（点击/拖拽/甩抛/回位）；空闲超阈值入睡
+    last_active: Instant,
+    /// 空闲入睡阈值（秒）；0 = 关闭
+    sleep_after: f64,
     pet: Pet,
     home_x: i32,
     home_y: i32,
@@ -69,6 +87,33 @@ struct App {
     frame_buf: Vec<u8>,
 }
 
+impl App {
+    /// 互动唤醒：若在睡觉切回待机，并重置空闲计时。
+    fn wake(&mut self, now: Instant) {
+        self.last_active = now;
+        if self.anim != Anim::Idle {
+            self.anim = Anim::Idle;
+            self.anim_t = 0.0;
+            self.last_frame = -1;
+            if debug_on() {
+                eprintln!("DEBUG anim -> Idle (wake)");
+            }
+        }
+    }
+
+    /// 强制入睡（菜单项）；睡眠帧包缺失时无操作。
+    fn sleep_now(&mut self) {
+        if self.sleep_pack.is_some() && self.anim != Anim::Sleep {
+            self.anim = Anim::Sleep;
+            self.anim_t = 0.0;
+            self.last_frame = -1;
+            if debug_on() {
+                eprintln!("DEBUG anim -> Sleep (menu)");
+            }
+        }
+    }
+}
+
 fn main() {
     unsafe {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2).ok();
@@ -101,6 +146,22 @@ fn debug_on() -> bool {
 fn run() -> Result<(), String> {
     let cfg = Config::load("assets/config.toml");
     let pack = FramePack::load("assets/frames.bin")?;
+    // 睡觉帧包可选：缺失或与待机帧包尺寸不一致（blit 源尺寸固定）时静默关闭睡眠
+    let sleep_pack = if cfg.sleep_after > 0.0 {
+        match FramePack::load("assets/sleep.bin") {
+            Ok(p) if p.width == pack.width && p.height == pack.height => Some(p),
+            Ok(_) => {
+                eprintln!("WARNING: assets/sleep.bin 尺寸与 frames.bin 不一致，睡眠动画关闭");
+                None
+            }
+            Err(e) => {
+                eprintln!("WARNING: 无法加载 assets/sleep.bin（{e}），睡眠动画关闭");
+                None
+            }
+        }
+    } else {
+        None
+    };
     let dpi = unsafe { GetDpiForSystem() } as f64;
     let scale = dpi / 96.0;
     let debug = debug_on();
@@ -132,6 +193,12 @@ fn run() -> Result<(), String> {
     let mut app = App {
         pet: Pet { x: home_x as f64, y: home_y as f64, w, h, ..Default::default() },
         pack,
+        sleep_pack,
+        anim: Anim::Idle,
+        anim_t: 0.0,
+        last_frame: -1,
+        last_active: Instant::now(),
+        sleep_after: cfg.sleep_after,
         home_x,
         home_y,
         squash_at: None,
@@ -159,10 +226,6 @@ fn run() -> Result<(), String> {
     let hwnd = window.hwnd;
 
     // 首帧 + 动画循环
-    let anim_dur = app.pack.count as f64 / app.pack.fps as f64;
-    let frame_secs = 1.0 / app.pack.fps as f64;
-    let mut anim_t = 0.0f64;
-    let mut last_frame: i64 = -1;
     let mut last = Instant::now();
     let mut first_paint = true;
 
@@ -265,12 +328,35 @@ fn run() -> Result<(), String> {
             app.popups.retain_mut(|p| p.tick(now));
         }
 
-        anim_t = (anim_t + dt) % anim_dur;
-        let frame_idx = (anim_t / frame_secs) as i64 % app.pack.count as i64;
+        // 入睡：空闲超阈值且已落稳（不拖拽、速度接近 0）才切换
+        if app.anim == Anim::Idle
+            && app.sleep_pack.is_some()
+            && !app.pet.dragging
+            && app.pet.vx.abs() < 1.0
+            && app.pet.vy.abs() < 1.0
+            && now.duration_since(app.last_active).as_secs_f64() >= app.sleep_after
+        {
+            app.anim = Anim::Sleep;
+            app.anim_t = 0.0;
+            app.last_frame = -1;
+            if debug {
+                eprintln!("DEBUG anim -> Sleep (idle {:.1}s)", app.sleep_after);
+            }
+        }
 
-        if frame_idx != last_frame || first_paint {
-            app.pack.decode_frame(frame_idx as usize, &mut app.frame_buf)?;
-            last_frame = frame_idx;
+        // 按当前状态选帧包推进动画（切状态时 anim_t/last_frame 已清零）
+        let cur: &FramePack = match app.anim {
+            Anim::Idle => &app.pack,
+            Anim::Sleep => app.sleep_pack.as_ref().unwrap(),
+        };
+        let anim_dur = cur.count as f64 / cur.fps as f64;
+        let frame_secs = 1.0 / cur.fps as f64;
+        app.anim_t = (app.anim_t + dt) % anim_dur;
+        let frame_idx = (app.anim_t / frame_secs) as i64 % cur.count as i64;
+
+        if frame_idx != app.last_frame || first_paint {
+            cur.decode_frame(frame_idx as usize, &mut app.frame_buf)?;
+            app.last_frame = frame_idx;
             first_paint = false;
         }
 
@@ -360,6 +446,8 @@ unsafe fn handle_message(hwnd: HWND, msg: MSG, app: &mut App) {
                 && cy >= app.pet.y as i32
                 && cy < app.pet.y as i32 + app.pet.h;
             if inside {
+                // 互动唤醒：点击/拎起即醒，并重置空闲计时
+                app.wake(now);
                 // 空中截击：按下瞬间飞行速度 ≥ 400（逻辑 px/s）即命中，弹得分卡；
                 // 命中的按下不再播点击 Q 弹（一次按下只走一条路，dsh 同语义）
                 let grab_speed =
@@ -421,6 +509,7 @@ unsafe fn handle_message(hwnd: HWND, msg: MSG, app: &mut App) {
 /// 够快就抛掷、不够快温柔放下。confine_to_screen 时锁定当前所在屏。
 fn finish_release(app: &mut App) {
     let now = Instant::now();
+    app.wake(now); // 甩抛/放下也算互动，重置空闲计时
     if app.sling {
         // 弹弓：力度 = 拉距 /（宽×0.6），方向 = 拉的反方向；不设软上限
         let pull_x = app.pet.x + app.pet.w as f64 / 2.0 - app.sling_ax;
@@ -458,6 +547,13 @@ unsafe fn show_menu(hwnd: HWND, app: &mut App) {
     SetForegroundWindow(hwnd);
     let menu = CreatePopupMenu().unwrap_or_default();
     AppendMenuW(menu, MF_STRING, 1, w!("回到初始位置"));
+    if app.sleep_pack.is_some() {
+        if app.anim == Anim::Sleep {
+            AppendMenuW(menu, MF_STRING, 3, w!("叫醒"));
+        } else {
+            AppendMenuW(menu, MF_STRING, 3, w!("强制睡觉"));
+        }
+    }
     AppendMenuW(menu, MF_SEPARATOR, 0, None);
     AppendMenuW(menu, MF_STRING, 2, w!("退出"));
     let mut pt = POINT::default();
@@ -479,6 +575,14 @@ unsafe fn show_menu(hwnd: HWND, app: &mut App) {
             app.pet.vy = 0.0;
             app.lock_screen = -1;
             app.prev_grounded = false;
+            app.wake(Instant::now());
+        }
+        3 => {
+            if app.anim == Anim::Sleep {
+                app.wake(Instant::now());
+            } else {
+                app.sleep_now();
+            }
         }
         2 => {
             DestroyMenu(menu);

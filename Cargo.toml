@@ -1,8 +1,8 @@
 [package]
 name = "milo-pet"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-description = "纯离线桌面宠物（Rust 重写版）：透明置顶窗口 + 帧序列动画 + 拖拽甩抛物理"
+description = "Offline desktop pet for Windows: transparent layered window + frame animation + drag-throw physics"
 
 [dependencies]
 windows = { version = "0.58", features = [

@@ -8,7 +8,8 @@
 
 - **透明置顶分层窗口**：`UpdateLayeredWindow` 逐像素 alpha 合成；不占任务栏、不抢焦点
 - **帧序列动画**：`assets/frames.bin`（预乘 BGRA + zstd 逐帧压缩），230 帧 @ 24fps 循环播放
-- **交互物理**：左键拖拽、松手甩抛（重力 2600 px/s²、反弹恢复 0.55、地面摩擦）、点击 Q 弹形变、右键菜单（回到初始位置 / 退出）
+- **交互物理**：左键拖拽、松手甩抛（重力 2600 px/s²、反弹恢复 0.55、地面摩擦）、点击 Q 弹形变、右键菜单（回到初始位置 / 强制睡觉 / 退出）
+- **空闲入睡**：安静超过 `sleep_after` 秒自动切换睡觉动画（`assets/sleep.bin`），点击/拖拽/甩抛唤醒；`sleep_after = 0` 或缺少 sleep.bin 时关闭
 - **DPI 自适应**：per-monitor-aware v2，窗口宽度按系统 DPI 缩放
 - **纯离线**：无网络请求，素材本地打包
 
@@ -52,6 +53,7 @@ width = 350     # 窗口宽度（逻辑像素，按 DPI 缩放；高度按素材
 corner = "top-right"   # 初始位置：top-right / top-left / bottom-right / bottom-left
 margin_x = 24   # 距工作区边缘的边距
 margin_y = 100
+sleep_after = 30   # 空闲入睡秒数（点击/拖拽唤醒）；0 = 关闭；需 assets/sleep.bin
 ```
 
 ## 帧包格式（MPETFB01，小端）

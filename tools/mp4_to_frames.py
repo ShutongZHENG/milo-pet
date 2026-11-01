@@ -32,6 +32,10 @@ SAT_MIN, VAL_MIN = 0.15, 0.15                # 饱和/明度下限（防灰白�
 HUE_FEATHER = 6.0                            # 色相边界羽化（度）
 WATERMARK_RECT = (1064, 656, 1262, 696)      # 水印矩形 (x0, y0, x1, y1)，无水印填 None
                                               # 例: (1055, 650, 1270, 702)
+# 环境变量覆盖：MET_WATERMARK="x0,y0,x1,y1" 或 MET_WATERMARK=none（按素材分辨率调整，勿硬改常量）
+import os as _os
+if _wm := _os.environ.get("MET_WATERMARK"):
+    WATERMARK_RECT = None if _wm.lower() == "none" else tuple(int(v) for v in _wm.split(","))
 
 def rgb_to_hsv(frame):
     """rgb24 (H,W,3) -> hue(0-360), sat(0-1), val(0-1)，numpy 向量化。"""

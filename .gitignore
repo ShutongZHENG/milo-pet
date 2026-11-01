@@ -1,5 +1,8 @@
 /target
 *.bin
 !assets/frames.bin
+!assets/sleep.bin
 *.bak
 frames/
+.venv/
+__pycache__/
