@@ -1,7 +1,9 @@
 //! 消息词汇表：内核/插件之间、以及（后续）到 Tauri 前端的事件与命令。
 
+use serde::{Deserialize, Serialize};
+
 /// 宠物运行期事件。
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum PetEvent {
     // ---- 命令（驱动插件）----
     /// 请求唤醒（点击/拖拽/甩抛/菜单叫醒）
@@ -29,7 +31,7 @@ pub enum PetEvent {
 }
 
 /// 控制宠物的命令（来自托盘/菜单/前端）。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PetCommand {
     /// 回到初始位置
     Reset,

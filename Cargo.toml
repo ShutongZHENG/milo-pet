@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/pet-core", "crates/pet-render", "crates/pet-app"]
+members = ["crates/pet-core", "crates/pet-render", "crates/pet-app", "src-tauri"]
 resolver = "2"
 
 [profile.release]
