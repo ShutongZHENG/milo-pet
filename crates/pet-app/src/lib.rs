@@ -19,6 +19,7 @@ use pet_core::plugin::{PetWorld, PluginRegistry};
 use pet_core::plugins::idle_sleep::IdleSleepPlugin;
 use pet_core::render::Renderer;
 use pet_core::score;
+use pet_render::dcomp::DirectCompositionRenderer;
 use pet_render::layered::LayeredRenderer;
 use pet_render::win32;
 use windows::core::w;
@@ -225,9 +226,17 @@ fn run_loop(
         frame_buf: vec![0u8; frame_bytes],
     };
 
-    // UpdateLayeredWindow 不拉伸源位图，blit 内部把帧缩放到显示尺寸后再贴
-    let mut renderer = LayeredRenderer::new(w, h, pw, ph)?;
-    let hwnd = renderer.hwnd();
+    // 渲染器选择：MILO_RENDERER=dc 用 DirectComposition（档3），默认分层窗口基线
+    let use_dc = std::env::var("MILO_RENDERER").map(|v| v == "dc").unwrap_or(false);
+    let (mut renderer, hwnd): (Box<dyn Renderer>, HWND) = if use_dc {
+        let r = DirectCompositionRenderer::new(w, h, pw, ph)?;
+        let h = r.hwnd();
+        (Box::new(r), h)
+    } else {
+        let r = LayeredRenderer::new(w, h, pw, ph)?;
+        let h = r.hwnd();
+        (Box::new(r), h)
+    };
 
     // 动画循环
     let mut last = Instant::now();
