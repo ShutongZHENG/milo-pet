@@ -4,6 +4,10 @@ version = "0.2.0"
 edition = "2021"
 description = "Offline desktop pet for Windows: transparent layered window + frame animation + drag-throw physics"
 
+[lib]
+name = "pet_app"
+path = "src/lib.rs"
+
 [[bin]]
 name = "milo-pet"
 path = "src/main.rs"

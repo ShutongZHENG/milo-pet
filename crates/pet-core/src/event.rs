@@ -1,4 +1,4 @@
-//! 事件词汇表：内核/插件之间、以及（后续）到 Tauri 前端的事件消息。
+//! 消息词汇表：内核/插件之间、以及（后续）到 Tauri 前端的事件与命令。
 
 /// 宠物运行期事件。
 #[derive(Clone, Debug, PartialEq)]
@@ -26,4 +26,17 @@ pub enum PetEvent {
     Woke,
     /// 飞行中被点击命中（得分）
     Scored { score: i32, speed: f64 },
+}
+
+/// 控制宠物的命令（来自托盘/菜单/前端）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PetCommand {
+    /// 回到初始位置
+    Reset,
+    /// 强制睡觉
+    Sleep,
+    /// 叫醒
+    Wake,
+    /// 退出
+    Quit,
 }
