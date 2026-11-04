@@ -25,6 +25,7 @@ use pet_render::layered::LayeredRenderer;
 use pet_render::win32;
 use windows::core::w;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Graphics::Dwm::DwmFlush;
 use windows::Win32::UI::HiDpi::{
     GetDpiForSystem, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
@@ -408,8 +409,10 @@ fn run_loop(
             }
         }
 
-        // 粒度 1ms 下 3ms 睡眠 ≈ 真 3ms（改动八：4ms → 3ms）
-        std::thread::sleep(std::time::Duration::from_millis(3));
+        // 对齐 DWM 垂直同步，消除呈现抖动；失败则退化为短睡眠防忙等
+        if unsafe { DwmFlush() }.is_err() {
+            std::thread::sleep(std::time::Duration::from_millis(3));
+        }
     }
     Ok(())
 }
