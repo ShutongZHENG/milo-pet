@@ -14,6 +14,7 @@ mod score_popup;
 use std::ffi::c_void;
 use std::time::Instant;
 
+use pet_core::animator::{Animator, Clip, Transition, CLIP_IDLE, CLIP_SLEEP};
 use pet_core::config::{Config, Corner};
 use pet_core::frames::FramePack;
 use pet_core::physics::{self, PhysicsParams, Pet, ThrowSpace};
@@ -28,29 +29,18 @@ use windows::Win32::UI::HiDpi::{
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_ESCAPE, VK_LBUTTON};
 use windows::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CreatePopupMenu, DestroyMenu, DispatchMessageW, GetCursorPos, GetMessageW,
-    PeekMessageW, SetForegroundWindow, SetWindowPos, TrackPopupMenu, TranslateMessage, MSG,
-    PM_REMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_NOACTIVATE, MF_SEPARATOR, MF_STRING, TPM_BOTTOMALIGN,
-    TPM_LEFTALIGN, TPM_NONOTIFY, TPM_RETURNCMD, WM_COMMAND, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    AppendMenuW, CreatePopupMenu, DestroyMenu, DispatchMessageW, GetCursorPos, PeekMessageW,
+    SetForegroundWindow, TrackPopupMenu, TranslateMessage, MSG, PM_REMOVE, MF_SEPARATOR, MF_STRING,
+    TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_NONOTIFY, TPM_RETURNCMD, WM_LBUTTONDOWN, WM_LBUTTONUP,
     WM_RBUTTONUP, WM_QUIT,
 };
-
-/// 动画状态：待机循环 / 睡觉循环（sleep.bin，可选）
-#[derive(Clone, Copy, PartialEq)]
-enum Anim {
-    Idle,
-    Sleep,
-}
 
 struct App {
     pack: FramePack,
     /// 睡觉帧包（assets/sleep.bin）；缺失或尺寸不一致时为 None（睡眠功能关闭）
     sleep_pack: Option<FramePack>,
-    anim: Anim,
-    /// 当前动画循环内时间（秒）；切状态时清零
-    anim_t: f64,
-    /// 上次解码帧号；-1 = 需强制重解
-    last_frame: i64,
+    /// 动画控制器（命名剪辑 + 帧推进 + 对齐帧过渡）
+    animator: Animator,
     /// 上次与宠物互动的时刻（点击/拖拽/甩抛/回位）；空闲超阈值入睡
     last_active: Instant,
     /// 空闲入睡阈值（秒）；0 = 关闭
@@ -59,8 +49,6 @@ struct App {
     sleep_entry_frame: i64,
     /// 睡觉动画起始帧号
     sleep_start_frame: u32,
-    /// 已满足空闲条件、正在等待对齐帧
-    sleep_pending: bool,
     pet: Pet,
     home_x: i32,
     home_y: i32,
@@ -99,11 +87,9 @@ impl App {
     /// 互动唤醒：若在睡觉切回待机，并重置空闲计时。
     fn wake(&mut self, now: Instant) {
         self.last_active = now;
-        self.sleep_pending = false;
-        if self.anim != Anim::Idle {
-            self.anim = Anim::Idle;
-            self.anim_t = 0.0;
-            self.last_frame = -1;
+        self.animator.clear_pending();
+        if self.animator.current() != CLIP_IDLE {
+            self.animator.play(CLIP_IDLE);
             if debug_on() {
                 eprintln!("DEBUG anim -> Idle (wake)");
             }
@@ -113,14 +99,9 @@ impl App {
     /// 强制入睡（菜单项）；睡眠帧包缺失时无操作。
     /// 菜单是用户主动触发，不等对齐帧，但同样从 sleep_start_frame 起播。
     fn sleep_now(&mut self) {
-        if let Some(sp) = self.sleep_pack.as_ref() {
-            if self.anim != Anim::Sleep {
-                let fps = sp.fps as f64;
-                let dur = sp.count as f64 / fps;
-                self.anim = Anim::Sleep;
-                self.anim_t = (self.sleep_start_frame as f64 / fps) % dur;
-                self.last_frame = -1;
-                self.sleep_pending = false;
+        if self.sleep_pack.is_some() {
+            if self.animator.current() != CLIP_SLEEP {
+                self.animator.play_from(CLIP_SLEEP, self.sleep_start_frame);
                 if debug_on() {
                     eprintln!(
                         "DEBUG anim -> Sleep (menu, start frame {})",
@@ -208,18 +189,24 @@ fn run() -> Result<(), String> {
 
     let frame_bytes = (pack.width * pack.height * 4) as usize;
     let (pw, ph) = (pack.width as i32, pack.height as i32);
+
+    // 动画控制器：注册命名剪辑（加新动画 = 这里多注册一个剪辑）
+    let mut animator = Animator::new();
+    animator.register(CLIP_IDLE, Clip { count: pack.count, fps: pack.fps });
+    if let Some(sp) = &sleep_pack {
+        animator.register(CLIP_SLEEP, Clip { count: sp.count, fps: sp.fps });
+    }
+    animator.play(CLIP_IDLE);
+
     let mut app = App {
         pet: Pet { x: home_x as f64, y: home_y as f64, w, h, ..Default::default() },
         pack,
         sleep_pack,
-        anim: Anim::Idle,
-        anim_t: 0.0,
-        last_frame: -1,
+        animator,
         last_active: Instant::now(),
         sleep_after: cfg.sleep_after,
         sleep_entry_frame: cfg.sleep_entry_frame,
         sleep_start_frame: cfg.sleep_start_frame,
-        sleep_pending: false,
         home_x,
         home_y,
         squash_at: None,
@@ -246,9 +233,8 @@ fn run() -> Result<(), String> {
     let mut renderer = LayeredRenderer::new(w, h, pw, ph)?;
     let hwnd = renderer.hwnd();
 
-    // 首帧 + 动画循环
+    // 动画循环
     let mut last = Instant::now();
-    let mut first_paint = true;
 
     let mut msg = MSG::default();
     let mut prev_lbtn = false;
@@ -349,17 +335,21 @@ fn run() -> Result<(), String> {
             app.popups.retain_mut(|p| p.tick(now));
         }
 
-        // 入睡：空闲超阈值且已落稳（不拖拽、速度接近 0）才进入 pending。
+        // 入睡：空闲超阈值且已落稳（不拖拽、速度接近 0）才排入对齐帧过渡。
         // 真正切换要等到待机播到 sleep_entry_frame 那一帧，保证衔接处两帧尽量相似。
-        if app.anim == Anim::Idle
+        if app.animator.current() == CLIP_IDLE
             && app.sleep_pack.is_some()
             && !app.pet.dragging
             && app.pet.vx.abs() < 1.0
             && app.pet.vy.abs() < 1.0
             && now.duration_since(app.last_active).as_secs_f64() >= app.sleep_after
-            && !app.sleep_pending
+            && !app.animator.is_pending()
         {
-            app.sleep_pending = true;
+            app.animator.schedule(Transition {
+                to: CLIP_SLEEP.to_string(),
+                at_frame: app.sleep_entry_frame,
+                start_frame: app.sleep_start_frame,
+            });
             if debug && app.sleep_entry_frame >= 0 {
                 eprintln!(
                     "DEBUG sleep pending (idle {:.1}s), waiting idle frame {}",
@@ -368,51 +358,23 @@ fn run() -> Result<(), String> {
             }
         }
 
-        // 按当前状态选帧包推进动画（切状态时 anim_t/last_frame 已重置）
-        let (cur_count, cur_fps) = match app.anim {
-            Anim::Idle => (app.pack.count, app.pack.fps),
-            Anim::Sleep => {
-                let sp = app.sleep_pack.as_ref().unwrap();
-                (sp.count, sp.fps)
-            }
-        };
-        let anim_dur = cur_count as f64 / cur_fps as f64;
-        let frame_secs = 1.0 / cur_fps as f64;
-        app.anim_t = (app.anim_t + dt) % anim_dur;
-        let mut frame_idx = (app.anim_t / frame_secs) as i64 % cur_count as i64;
-
-        // 待机正好播到对齐帧：此刻切睡，睡眠从 sleep_start_frame 起播。
-        // 同一帧内完成切换 + 重算帧号，所以画面上不会多停留一帧。
-        if app.anim == Anim::Idle
-            && app.sleep_pending
-            && (app.sleep_entry_frame < 0 || frame_idx == app.sleep_entry_frame)
-        {
-            if let Some(sp) = app.sleep_pack.as_ref() {
-                let fps = sp.fps as f64;
-                let dur = sp.count as f64 / fps;
-                app.anim = Anim::Sleep;
-                app.anim_t = (app.sleep_start_frame as f64 / fps) % dur;
-                app.last_frame = -1;
-                app.sleep_pending = false;
-                frame_idx = (app.anim_t * fps) as i64 % sp.count as i64;
-                if debug {
-                    eprintln!(
-                        "DEBUG anim -> Sleep (idle {:.1}s, idle frame {} -> sleep frame {})",
-                        app.sleep_after, app.sleep_entry_frame, app.sleep_start_frame
-                    );
-                }
+        // 推进动画（Animator 内部处理帧推进 + 对齐帧过渡），换帧才解码
+        let update = app.animator.tick(dt).ok_or("动画控制器无当前剪辑")?;
+        if let Some(tr) = &update.fired {
+            if debug {
+                eprintln!(
+                    "DEBUG anim -> {} (idle {:.1}s, idle frame {} -> start frame {})",
+                    tr.to, app.sleep_after, tr.at_frame, tr.start_frame
+                );
             }
         }
-
-        let cur: &FramePack = match app.anim {
-            Anim::Idle => &app.pack,
-            Anim::Sleep => app.sleep_pack.as_ref().unwrap(),
+        let cur: &FramePack = match update.clip.as_str() {
+            CLIP_IDLE => &app.pack,
+            CLIP_SLEEP => app.sleep_pack.as_ref().ok_or("睡眠剪辑缺失")?,
+            other => return Err(format!("未知动画剪辑: {other}")),
         };
-
-        if frame_idx != app.last_frame || first_paint {
-            cur.decode_frame(frame_idx as usize, &mut app.frame_buf)?;
-            app.last_frame = frame_idx;
-            first_paint = false;
+        if update.changed {
+            cur.decode_frame(update.frame, &mut app.frame_buf)?;
         }
 
         // Q 弹形变：仅 scaleY、底边锚定（ease-in 下压 + easeOutBack 回弹）
@@ -603,7 +565,7 @@ unsafe fn show_menu(hwnd: HWND, app: &mut App) {
     let menu = CreatePopupMenu().unwrap_or_default();
     AppendMenuW(menu, MF_STRING, 1, w!("回到初始位置"));
     if app.sleep_pack.is_some() {
-        if app.anim == Anim::Sleep {
+        if app.animator.current() == CLIP_SLEEP {
             AppendMenuW(menu, MF_STRING, 3, w!("叫醒"));
         } else {
             AppendMenuW(menu, MF_STRING, 3, w!("强制睡觉"));
@@ -633,7 +595,7 @@ unsafe fn show_menu(hwnd: HWND, app: &mut App) {
             app.wake(Instant::now());
         }
         3 => {
-            if app.anim == Anim::Sleep {
+            if app.animator.current() == CLIP_SLEEP {
                 app.wake(Instant::now());
             } else {
                 app.sleep_now();
