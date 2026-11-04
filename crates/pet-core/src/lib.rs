@@ -3,7 +3,10 @@
 
 pub mod animator;
 pub mod config;
+pub mod event;
 pub mod frames;
 pub mod physics;
+pub mod plugin;
+pub mod plugins;
 pub mod render;
 pub mod score;
