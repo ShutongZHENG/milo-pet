@@ -13,7 +13,7 @@ use windows::Win32::Graphics::Gdi::{
     DT_SINGLELINE, DT_VCENTER, FW_BOLD, HBITMAP, HDC, HFONT, LOGFONTW, TRANSPARENT,
 };
 
-use crate::win32;
+use pet_render::win32;
 
 // ---- score-popup.ts 常量（逻辑 px / ms）----
 /// 弹窗展示时长。
@@ -123,7 +123,7 @@ struct Particle {
 fn ensure_font_loaded() {
     static ONCE: OnceLock<()> = OnceLock::new();
     ONCE.get_or_init(|| unsafe {
-        let bytes: &'static [u8] = include_bytes!("../assets/上首软糖体.ttf");
+        let bytes: &'static [u8] = include_bytes!("../../../assets/上首软糖体.ttf");
         let mut num = 0u32;
         let _ = AddFontMemResourceEx(
             bytes.as_ptr() as *const std::ffi::c_void,

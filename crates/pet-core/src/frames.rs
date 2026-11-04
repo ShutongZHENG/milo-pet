@@ -10,7 +10,6 @@ pub struct FramePack {
     pub height: u32,
     pub fps: u32,
     offsets: Vec<u32>,
-    blob_section: usize,
     file: Vec<u8>,
 }
 
@@ -29,8 +28,7 @@ impl FramePack {
         for i in 0..count as usize {
             offsets.push(u32_at(24 + i * 4));
         }
-        let blob_section = 24 + count as usize * 4;
-        Ok(FramePack { count, width, height, fps, offsets, blob_section, file })
+        Ok(FramePack { count, width, height, fps, offsets, file })
     }
 
     pub fn frame_bytes(&self) -> usize {

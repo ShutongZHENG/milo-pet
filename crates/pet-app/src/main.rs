@@ -9,19 +9,18 @@
 // Windows GUI 应用：不显示控制台窗口
 #![windows_subsystem = "windows"]
 
-mod config;
-mod frames;
-mod physics;
-mod score;
 mod score_popup;
-mod win32;
 
 use std::ffi::c_void;
 use std::time::Instant;
 
-use config::{Config, Corner};
-use frames::FramePack;
-use physics::{PhysicsParams, Pet, ThrowSpace};
+use pet_core::config::{Config, Corner};
+use pet_core::frames::FramePack;
+use pet_core::physics::{self, PhysicsParams, Pet, ThrowSpace};
+use pet_core::render::Renderer;
+use pet_core::score;
+use pet_render::layered::LayeredRenderer;
+use pet_render::win32;
 use windows::core::w;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::UI::HiDpi::{
@@ -244,8 +243,8 @@ fn run() -> Result<(), String> {
     };
 
     // UpdateLayeredWindow 不拉伸源位图，blit 内部把帧缩放到显示尺寸后再贴
-    let window = win32::PetWindow::create(w, h, pw, ph)?;
-    let hwnd = window.hwnd;
+    let mut renderer = LayeredRenderer::new(w, h, pw, ph)?;
+    let hwnd = renderer.hwnd();
 
     // 首帧 + 动画循环
     let mut last = Instant::now();
@@ -422,7 +421,7 @@ fn run() -> Result<(), String> {
         let dh = (app.pet.h as f64 * sy).round() as i32;
         let dx = 0;
         let dy = app.pet.h - dh;
-        window.blit(
+        renderer.present(
             &app.frame_buf,
             app.pet.x as i32 + dx,
             app.pet.y as i32 + dy,

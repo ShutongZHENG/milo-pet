@@ -1,0 +1,23 @@
+[package]
+name = "milo-pet"
+version = "0.2.0"
+edition = "2021"
+description = "Offline desktop pet for Windows: transparent layered window + frame animation + drag-throw physics"
+
+[[bin]]
+name = "milo-pet"
+path = "src/main.rs"
+
+[dependencies]
+pet-core = { path = "../pet-core" }
+pet-render = { path = "../pet-render" }
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Media",
+    "Win32_System_LibraryLoader",
+    "Win32_System_SystemInformation",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
