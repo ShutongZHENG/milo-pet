@@ -2,8 +2,11 @@
 
 use std::fs;
 
+use serde::{Deserialize, Serialize};
+
 use crate::physics::PhysicsParams;
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
     /// 窗口宽度（逻辑像素，按 DPI 缩放）
     pub width: f64,
@@ -16,9 +19,14 @@ pub struct Config {
     pub confine_to_screen: bool,
     /// 空闲入睡阈值（秒）：安静超过该时长自动切换睡觉动画；0 = 关闭睡眠
     pub sleep_after: f64,
+    /// 入睡对齐帧：空闲满足后不立即切，等待机循环播到该帧号才切（-1 = 不对齐，立即切）
+    pub sleep_entry_frame: i64,
+    /// 睡觉动画起始帧号（入睡瞬间从该帧起播；与 sleep_entry_frame 配对可做到衔接零跳变）
+    pub sleep_start_frame: u32,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Corner {
     TopRight,
     TopLeft,
@@ -40,6 +48,8 @@ impl Config {
             physics: PhysicsParams::default(),
             confine_to_screen: false,
             sleep_after: 30.0,
+            sleep_entry_frame: 261,
+            sleep_start_frame: 33,
         };
         let Ok(text) = fs::read_to_string(path) else {
             return cfg;
@@ -74,6 +84,16 @@ impl Config {
                 cfg.sleep_after = s;
             }
         }
+        if let Some(f) = num(value.get("sleep_entry_frame")) {
+            if f >= -1.0 {
+                cfg.sleep_entry_frame = f as i64;
+            }
+        }
+        if let Some(f) = num(value.get("sleep_start_frame")) {
+            if f >= 0.0 {
+                cfg.sleep_start_frame = f as u32;
+            }
+        }
         if let Some(p) = value.get("physics") {
             if let Some(g) = num(p.get("gravity")) {
                 if g >= 0.0 {
@@ -100,5 +120,11 @@ impl Config {
             }
         }
         cfg
+    }
+
+    /// 序列化并写回 config.toml（供设置页写回）。
+    pub fn save(&self, path: &str) -> Result<(), String> {
+        let text = toml::to_string_pretty(self).map_err(|e| format!("序列化配置失败: {e}"))?;
+        fs::write(path, text).map_err(|e| format!("写入配置失败 {path}: {e}"))
     }
 }

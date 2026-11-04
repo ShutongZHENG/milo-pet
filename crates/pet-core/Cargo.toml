@@ -1,0 +1,10 @@
+[package]
+name = "pet-core"
+version = "0.1.0"
+edition = "2021"
+description = "milo-pet pure logic core: physics, score, frame pack, config, renderer abstraction"
+
+[dependencies]
+zstd = "0.13"
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }

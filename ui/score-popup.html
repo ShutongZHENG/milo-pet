@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <title>score</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        overflow: hidden;
+      }
+      #card {
+        position: absolute;
+        left: 50%;
+        bottom: 40px;
+        transform: translateX(-50%) scale(0.6);
+        opacity: 0;
+        background: rgba(255, 255, 255, 0.97);
+        border: 1px solid rgba(255, 179, 0, 0.35);
+        border-radius: 12px;
+        padding: 8px 16px 9px;
+        box-shadow: 0 10px 32px rgba(0, 0, 0, 0.22);
+        text-align: center;
+        white-space: nowrap;
+        pointer-events: none;
+        transition: transform 0.28s cubic-bezier(0.25, 0.1, 0.25, 1),
+          opacity 0.28s cubic-bezier(0.25, 0.1, 0.25, 1);
+      }
+      #card.show {
+        transform: translateX(-50%) scale(1);
+        opacity: 1;
+      }
+      #val {
+        font-size: 22px;
+        font-weight: 700;
+        color: #ff8f00;
+        line-height: 27.5px;
+      }
+      #sub {
+        font-size: 11px;
+        color: rgba(43, 43, 43, 0.6);
+        line-height: 15.4px;
+        margin-top: 2px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="card">
+      <div id="val">+0</div>
+      <div id="sub">速度 0 · 大小 0</div>
+    </div>
+    <script>
+      const { listen } = window.__TAURI__.event;
+      const { getCurrentWindow } = window.__TAURI__.window;
+      const win = getCurrentWindow();
+      const card = document.getElementById("card");
+      const valEl = document.getElementById("val");
+      const subEl = document.getElementById("sub");
+      let hideTimer = null;
+
+      listen("pet-event", (event) => {
+        const payload = event.payload;
+        if (!payload || !payload.Scored) return;
+        const s = payload.Scored;
+        valEl.textContent = "+" + s.score;
+        subEl.textContent = "速度 " + Math.round(s.speed) + " · 大小 " + Math.round(s.size);
+        card.classList.remove("show");
+        void card.offsetWidth; // 强制重排，重启入场动画
+        card.classList.add("show");
+        if (hideTimer) clearTimeout(hideTimer);
+        hideTimer = setTimeout(() => {
+          card.classList.remove("show");
+          setTimeout(() => win.hide(), 300);
+        }, 2200);
+      });
+    </script>
+  </body>
+</html>

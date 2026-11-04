@@ -8,3 +8,6 @@ frames/
 __pycache__/
 /release/
 FIX_CONSOLE_ISSUE.md
+
+/inspect/
+/assets/sleep_frames/

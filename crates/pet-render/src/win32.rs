@@ -81,6 +81,10 @@ pub struct Blitter {
     /// 帧素材原始尺寸（640x360）
     frame_w: i32,
     frame_h: i32,
+    /// 缩放帧缓存：目标尺寸不变（抛掷时恒定）时跳过双线性缩放
+    scaled: Vec<u8>,
+    scaled_w: i32,
+    scaled_h: i32,
 }
 
 /// 双线性缩放预乘 BGRA 帧到目标尺寸，写入 dst（行主序，dw*dh*4）。
@@ -139,14 +143,25 @@ impl Blitter {
                 .map_err(|e| format!("CreateDIBSection 失败: {e}"))?;
             SelectObject(mem_dc, bitmap);
             ReleaseDC(None, screen_dc);
-            Ok(Blitter { mem_dc, bitmap, bits, w, h, frame_w, frame_h })
+            Ok(Blitter {
+                mem_dc,
+                bitmap,
+                bits,
+                w,
+                h,
+                frame_w,
+                frame_h,
+                scaled: Vec::new(),
+                scaled_w: 0,
+                scaled_h: 0,
+            })
         }
     }
 
     /// 把帧（frame_w×frame_h 预乘 BGRA）缩放到 dst_w×dst_h 后贴到屏幕 (dst_x, dst_y)。
     /// UpdateLayeredWindow 不会拉伸源位图——必须先缩放再贴，否则只显示左上角裁切。
     pub fn blit(
-        &self,
+        &mut self,
         hwnd: HWND,
         bgra: &[u8],
         dst_x: i32,
@@ -168,15 +183,20 @@ impl Blitter {
                 // 1:1 快路径
                 dib[..expect].copy_from_slice(bgra);
             } else {
+                // 缩放帧缓存：目标尺寸不变（抛掷时恒定）则跳过双线性缩放
+                if dst_w != self.scaled_w || dst_h != self.scaled_h {
+                    self.scaled.resize((dst_w * dst_h * 4) as usize, 0);
+                    scale_bilinear(bgra, self.frame_w, self.frame_h, &mut self.scaled, dst_w, dst_h);
+                    self.scaled_w = dst_w;
+                    self.scaled_h = dst_h;
+                }
                 // 只写目标行区（行距 self.w*4，目标宽 dst_w*4）
-                let mut tmp = vec![0u8; (dst_w * dst_h * 4) as usize];
-                scale_bilinear(bgra, self.frame_w, self.frame_h, &mut tmp, dst_w, dst_h);
                 let row_dst = (self.w * 4) as usize;
                 let row_src = (dst_w * 4) as usize;
                 for y in 0..dst_h as usize {
                     let s = y * row_src;
                     let d = y * row_dst;
-                    dib[d..d + row_src].copy_from_slice(&tmp[s..s + row_src]);
+                    dib[d..d + row_src].copy_from_slice(&self.scaled[s..s + row_src]);
                 }
             }
 
@@ -264,7 +284,7 @@ impl PetWindow {
         }
     }
 
-    pub fn blit(&self, bgra: &[u8], x: i32, y: i32, w: i32, h: i32) -> Result<(), String> {
+    pub fn blit(&mut self, bgra: &[u8], x: i32, y: i32, w: i32, h: i32) -> Result<(), String> {
         self.blitter.blit(self.hwnd, bgra, x, y, w, h)
     }
 }
@@ -353,7 +373,7 @@ impl PopupWindow {
     }
 
     /// 1:1 贴整块预乘 BGRA（长度必须为 w*h*4）并更新到屏幕 (x, y)。
-    pub fn update(&self, bgra: &[u8], x: i32, y: i32) -> Result<(), String> {
+    pub fn update(&mut self, bgra: &[u8], x: i32, y: i32) -> Result<(), String> {
         self.blitter.blit(self.hwnd, bgra, x, y, self.w, self.h)
     }
 }
