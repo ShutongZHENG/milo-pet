@@ -9,6 +9,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
+serde = { version = "1", features = ["derive"] }
 pet-core = { path = "../crates/pet-core" }
 pet-render = { path = "../crates/pet-render" }
 pet_app = { path = "../crates/pet-app", package = "milo-pet" }

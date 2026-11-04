@@ -2,8 +2,11 @@
 
 use std::fs;
 
+use serde::{Deserialize, Serialize};
+
 use crate::physics::PhysicsParams;
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
     /// 窗口宽度（逻辑像素，按 DPI 缩放）
     pub width: f64,
@@ -22,7 +25,8 @@ pub struct Config {
     pub sleep_start_frame: u32,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Corner {
     TopRight,
     TopLeft,
@@ -116,5 +120,11 @@ impl Config {
             }
         }
         cfg
+    }
+
+    /// 序列化并写回 config.toml（供设置页写回）。
+    pub fn save(&self, path: &str) -> Result<(), String> {
+        let text = toml::to_string_pretty(self).map_err(|e| format!("序列化配置失败: {e}"))?;
+        fs::write(path, text).map_err(|e| format!("写入配置失败 {path}: {e}"))
     }
 }

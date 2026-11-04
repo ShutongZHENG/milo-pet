@@ -1792,6 +1792,7 @@ dependencies = [
  "milo-pet",
  "pet-core",
  "pet-render",
+ "serde",
  "tauri",
  "tauri-build",
 ]

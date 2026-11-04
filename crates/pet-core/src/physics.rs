@@ -4,6 +4,8 @@
 
 use std::time::Instant;
 
+use serde::{Deserialize, Serialize};
+
 // ---- 拖拽弹簧 ----
 /// 拖拽弹簧刚度：越大跟手越紧。
 pub const SPRING_K: f64 = 200.0;
@@ -75,7 +77,7 @@ pub const SUBSTEP_MAX: u32 = 64;
 pub const SIDE_ALLOW_RATIO: f64 = 200.0 / 640.0;
 
 /// 运行时物理参数（成品配置的 [physics] 段；缺失字段回落本默认）。
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct PhysicsParams {
     pub gravity: f64,
     pub restitution: f64,
