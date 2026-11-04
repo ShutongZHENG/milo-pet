@@ -16,6 +16,10 @@ pub struct Config {
     pub confine_to_screen: bool,
     /// 空闲入睡阈值（秒）：安静超过该时长自动切换睡觉动画；0 = 关闭睡眠
     pub sleep_after: f64,
+    /// 入睡对齐帧：空闲满足后不立即切，等待机循环播到该帧号才切（-1 = 不对齐，立即切）
+    pub sleep_entry_frame: i64,
+    /// 睡觉动画起始帧号（入睡瞬间从该帧起播；与 sleep_entry_frame 配对可做到衔接零跳变）
+    pub sleep_start_frame: u32,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -40,6 +44,8 @@ impl Config {
             physics: PhysicsParams::default(),
             confine_to_screen: false,
             sleep_after: 30.0,
+            sleep_entry_frame: 261,
+            sleep_start_frame: 33,
         };
         let Ok(text) = fs::read_to_string(path) else {
             return cfg;
@@ -72,6 +78,16 @@ impl Config {
         if let Some(s) = num(value.get("sleep_after")) {
             if s >= 0.0 {
                 cfg.sleep_after = s;
+            }
+        }
+        if let Some(f) = num(value.get("sleep_entry_frame")) {
+            if f >= -1.0 {
+                cfg.sleep_entry_frame = f as i64;
+            }
+        }
+        if let Some(f) = num(value.get("sleep_start_frame")) {
+            if f >= 0.0 {
+                cfg.sleep_start_frame = f as u32;
             }
         }
         if let Some(p) = value.get("physics") {

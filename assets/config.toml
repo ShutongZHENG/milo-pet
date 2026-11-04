@@ -14,6 +14,13 @@ confine_to_screen = false
 # 需 assets/sleep.bin 存在，缺失时自动关闭
 sleep_after = 30
 
+# 入睡对齐：空闲满足后不立即切，等待机循环播到该帧号才切睡（-1 = 不对齐，立即切）
+# 261 与下面的 sleep_start_frame = 33 是实测最相似的一对
+# （缩略图 RMS 0.0325，随机两帧配对的典型值约 0.147）
+sleep_entry_frame = 261
+# 睡觉动画起始帧号：入睡瞬间从该帧起播，与上面配对可做到衔接零跳变
+sleep_start_frame = 33
+
 # 抛掷物理（对标 dsh-pet；缺省字段回落内置默认）
 [physics]
 gravity = 1400        # px/s²

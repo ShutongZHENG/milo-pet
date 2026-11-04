@@ -56,6 +56,12 @@ struct App {
     last_active: Instant,
     /// 空闲入睡阈值（秒）；0 = 关闭
     sleep_after: f64,
+    /// 入睡对齐帧：置 pending 后等待机播到该帧才真正切换（-1 = 不对齐，立即切）
+    sleep_entry_frame: i64,
+    /// 睡觉动画起始帧号
+    sleep_start_frame: u32,
+    /// 已满足空闲条件、正在等待对齐帧
+    sleep_pending: bool,
     pet: Pet,
     home_x: i32,
     home_y: i32,
@@ -94,6 +100,7 @@ impl App {
     /// 互动唤醒：若在睡觉切回待机，并重置空闲计时。
     fn wake(&mut self, now: Instant) {
         self.last_active = now;
+        self.sleep_pending = false;
         if self.anim != Anim::Idle {
             self.anim = Anim::Idle;
             self.anim_t = 0.0;
@@ -105,13 +112,22 @@ impl App {
     }
 
     /// 强制入睡（菜单项）；睡眠帧包缺失时无操作。
+    /// 菜单是用户主动触发，不等对齐帧，但同样从 sleep_start_frame 起播。
     fn sleep_now(&mut self) {
-        if self.sleep_pack.is_some() && self.anim != Anim::Sleep {
-            self.anim = Anim::Sleep;
-            self.anim_t = 0.0;
-            self.last_frame = -1;
-            if debug_on() {
-                eprintln!("DEBUG anim -> Sleep (menu)");
+        if let Some(sp) = self.sleep_pack.as_ref() {
+            if self.anim != Anim::Sleep {
+                let fps = sp.fps as f64;
+                let dur = sp.count as f64 / fps;
+                self.anim = Anim::Sleep;
+                self.anim_t = (self.sleep_start_frame as f64 / fps) % dur;
+                self.last_frame = -1;
+                self.sleep_pending = false;
+                if debug_on() {
+                    eprintln!(
+                        "DEBUG anim -> Sleep (menu, start frame {})",
+                        self.sleep_start_frame
+                    );
+                }
             }
         }
     }
@@ -202,6 +218,9 @@ fn run() -> Result<(), String> {
         last_frame: -1,
         last_active: Instant::now(),
         sleep_after: cfg.sleep_after,
+        sleep_entry_frame: cfg.sleep_entry_frame,
+        sleep_start_frame: cfg.sleep_start_frame,
+        sleep_pending: false,
         home_x,
         home_y,
         squash_at: None,
@@ -331,31 +350,65 @@ fn run() -> Result<(), String> {
             app.popups.retain_mut(|p| p.tick(now));
         }
 
-        // 入睡：空闲超阈值且已落稳（不拖拽、速度接近 0）才切换
+        // 入睡：空闲超阈值且已落稳（不拖拽、速度接近 0）才进入 pending。
+        // 真正切换要等到待机播到 sleep_entry_frame 那一帧，保证衔接处两帧尽量相似。
         if app.anim == Anim::Idle
             && app.sleep_pack.is_some()
             && !app.pet.dragging
             && app.pet.vx.abs() < 1.0
             && app.pet.vy.abs() < 1.0
             && now.duration_since(app.last_active).as_secs_f64() >= app.sleep_after
+            && !app.sleep_pending
         {
-            app.anim = Anim::Sleep;
-            app.anim_t = 0.0;
-            app.last_frame = -1;
-            if debug {
-                eprintln!("DEBUG anim -> Sleep (idle {:.1}s)", app.sleep_after);
+            app.sleep_pending = true;
+            if debug && app.sleep_entry_frame >= 0 {
+                eprintln!(
+                    "DEBUG sleep pending (idle {:.1}s), waiting idle frame {}",
+                    app.sleep_after, app.sleep_entry_frame
+                );
             }
         }
 
-        // 按当前状态选帧包推进动画（切状态时 anim_t/last_frame 已清零）
+        // 按当前状态选帧包推进动画（切状态时 anim_t/last_frame 已重置）
+        let (cur_count, cur_fps) = match app.anim {
+            Anim::Idle => (app.pack.count, app.pack.fps),
+            Anim::Sleep => {
+                let sp = app.sleep_pack.as_ref().unwrap();
+                (sp.count, sp.fps)
+            }
+        };
+        let anim_dur = cur_count as f64 / cur_fps as f64;
+        let frame_secs = 1.0 / cur_fps as f64;
+        app.anim_t = (app.anim_t + dt) % anim_dur;
+        let mut frame_idx = (app.anim_t / frame_secs) as i64 % cur_count as i64;
+
+        // 待机正好播到对齐帧：此刻切睡，睡眠从 sleep_start_frame 起播。
+        // 同一帧内完成切换 + 重算帧号，所以画面上不会多停留一帧。
+        if app.anim == Anim::Idle
+            && app.sleep_pending
+            && (app.sleep_entry_frame < 0 || frame_idx == app.sleep_entry_frame)
+        {
+            if let Some(sp) = app.sleep_pack.as_ref() {
+                let fps = sp.fps as f64;
+                let dur = sp.count as f64 / fps;
+                app.anim = Anim::Sleep;
+                app.anim_t = (app.sleep_start_frame as f64 / fps) % dur;
+                app.last_frame = -1;
+                app.sleep_pending = false;
+                frame_idx = (app.anim_t * fps) as i64 % sp.count as i64;
+                if debug {
+                    eprintln!(
+                        "DEBUG anim -> Sleep (idle {:.1}s, idle frame {} -> sleep frame {})",
+                        app.sleep_after, app.sleep_entry_frame, app.sleep_start_frame
+                    );
+                }
+            }
+        }
+
         let cur: &FramePack = match app.anim {
             Anim::Idle => &app.pack,
             Anim::Sleep => app.sleep_pack.as_ref().unwrap(),
         };
-        let anim_dur = cur.count as f64 / cur.fps as f64;
-        let frame_secs = 1.0 / cur.fps as f64;
-        app.anim_t = (app.anim_t + dt) % anim_dur;
-        let frame_idx = (app.anim_t / frame_secs) as i64 % cur.count as i64;
 
         if frame_idx != app.last_frame || first_paint {
             cur.decode_frame(frame_idx as usize, &mut app.frame_buf)?;
