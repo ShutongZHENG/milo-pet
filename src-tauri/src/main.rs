@@ -48,16 +48,38 @@ fn main() {
                 let _ = app_handle.exit(0);
             });
 
-            // 事件转发线程：PetEvent → Tauri 前端（后续 M5 得分弹窗/设置页订阅）
+            // 事件转发线程：PetEvent → Tauri 前端；Scored 时定位并显示弹窗
             let app_handle2 = app.handle().clone();
             std::thread::spawn(move || {
                 while let Ok(ev) = events_rx.recv() {
+                    if let PetEvent::Scored { x, y, .. } = &ev {
+                        if let Some(win) = app_handle2.get_webview_window("score-popup") {
+                            let _ = win.set_position(tauri::PhysicalPosition::new(x - 180, y - 280));
+                            let _ = win.show();
+                        }
+                    }
                     let _ = app_handle2.emit("pet-event", ev);
                 }
             });
 
             // 命令发送端托管到状态
             app.manage(PetState { commands_tx: Mutex::new(commands_tx) });
+
+            // 得分弹窗：透明置顶 WebView 窗口（初始隐藏，Scored 时定位显示）
+            let _popup = WebviewWindowBuilder::new(
+                app,
+                "score-popup",
+                WebviewUrl::App("score-popup.html".into()),
+            )
+            .title("")
+            .inner_size(360.0, 280.0)
+            .transparent(true)
+            .decorations(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .focused(false)
+            .visible(false)
+            .build()?;
 
             // 托盘菜单
             let reset_i = MenuItem::with_id(app, "reset", "回到初始位置", true, None::<&str>)?;

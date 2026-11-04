@@ -6,8 +6,6 @@
 //! - 交互：左键按住拖拽、甩抛（重力/反弹/摩擦）、点击 Q 弹、右键菜单（回位/退出）
 //! - 配置：assets/config.toml
 
-mod score_popup;
-
 use std::ffi::c_void;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Instant;
@@ -29,7 +27,7 @@ use windows::Win32::Graphics::Dwm::DwmFlush;
 use windows::Win32::UI::HiDpi::{
     GetDpiForSystem, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_ESCAPE, VK_LBUTTON};
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, DestroyMenu, DispatchMessageW, GetCursorPos, PeekMessageW,
     SetForegroundWindow, TrackPopupMenu, TranslateMessage, MSG, PM_REMOVE, MF_SEPARATOR, MF_STRING,
@@ -67,8 +65,6 @@ struct App {
     prev_grounded: bool,
     /// 锁定屏索引（confine_to_screen 时抛掷全程锁定；-1 = 不锁）
     lock_screen: i32,
-    /// 活跃的得分弹窗（2.2s 生命周期）
-    popups: Vec<score_popup::ScorePopup>,
     frame_buf: Vec<u8>,
     /// 事件发送端（桥接到 Tauri 前端；独立运行时可忽略）
     events_tx: Sender<PetEvent>,
@@ -226,7 +222,6 @@ fn run_loop(
         sling_ay: 0.0,
         prev_grounded: false,
         lock_screen: -1,
-        popups: Vec::new(),
         frame_buf: vec![0u8; frame_bytes],
     };
 
@@ -238,7 +233,6 @@ fn run_loop(
     let mut last = Instant::now();
 
     let mut msg = MSG::default();
-    let mut prev_lbtn = false;
     // 频率自测：MILO_DEBUG=1 时启动 3 秒后打印一次主循环 Hz
     let dbg_start = Instant::now();
     let mut dbg_frames: u64 = 0;
@@ -333,26 +327,6 @@ fn run_loop(
                 app.emit(PetEvent::Landed { impact: falling_vy });
             }
             app.prev_grounded = grounded;
-        }
-
-        // 得分弹窗：点外/Esc 关闭（按下用全局轮询——桌面点击到不了本窗口）+ 生命周期推进
-        let lbtn_down = unsafe { (GetAsyncKeyState(VK_LBUTTON.0 as i32) as u16) & 0x8000 != 0 };
-        if lbtn_down && !prev_lbtn && !app.popups.is_empty() {
-            let (cx, cy) = cursor_pos();
-            for p in &mut app.popups {
-                // 挂载宽限（同 dsh：吞掉触发挂载的那次按下）
-                if p.age_ms(now) >= score_popup::GRACE_MS && !p.contains(cx, cy) {
-                    p.close();
-                }
-            }
-        }
-        prev_lbtn = lbtn_down;
-        if !app.popups.is_empty() {
-            let esc = unsafe { (GetAsyncKeyState(VK_ESCAPE.0 as i32) as u16) & 0x8000 != 0 };
-            if esc {
-                app.popups.iter_mut().for_each(|p| p.close());
-            }
-            app.popups.retain_mut(|p| p.tick(now));
         }
 
         // 插件推进（空闲入睡逻辑已抽到 IdleSleepPlugin）
@@ -478,18 +452,14 @@ unsafe fn handle_message(hwnd: HWND, msg: MSG, app: &mut App) {
                 let scored = grab_speed >= score::SCORE_MIN_SPEED;
                 if scored {
                     let sc = score::click_score(grab_speed, app.world.pet.w as f64 / app.world.dpi_scale);
-                    app.emit(PetEvent::Scored { score: sc, speed: grab_speed });
-                    match score_popup::ScorePopup::create(
-                        cx,
-                        cy,
-                        sc,
-                        grab_speed,
-                        app.world.pet.w as f64 / app.world.dpi_scale,
-                        app.world.dpi_scale,
-                    ) {
-                        Ok(p) => app.popups.push(p),
-                        Err(e) => eprintln!("score popup 创建失败: {e}"),
-                    }
+                    app.emit(PetEvent::Scored {
+                        x: cx,
+                        y: cy,
+                        score: sc,
+                        speed: grab_speed,
+                        size: app.world.pet.w as f64 / app.world.dpi_scale,
+                        dpi: app.world.dpi_scale,
+                    });
                 }
                 app.world.pet.dragging = true;
                 app.drag_vel = (0.0, 0.0);

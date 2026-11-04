@@ -26,8 +26,8 @@ pub enum PetEvent {
     SleepEntered,
     /// 唤醒
     Woke,
-    /// 飞行中被点击命中（得分）
-    Scored { score: i32, speed: f64 },
+    /// 飞行中被点击命中（得分；含光标位置/size/dpi 供弹窗定位）
+    Scored { x: i32, y: i32, score: i32, speed: f64, size: f64, dpi: f64 },
 }
 
 /// 控制宠物的命令（来自托盘/菜单/前端）。
